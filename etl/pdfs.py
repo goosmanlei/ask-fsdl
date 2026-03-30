@@ -6,22 +6,18 @@ import etl.shared
 image = etl.shared.image.pip_install(
     "arxiv==1.4.7",
     "pypdf==3.8.1",
-)
+).add_local_python_source("docstore", "utils")
 
-stub = modal.Stub(
+app = modal.App(
     name="etl-pdfs",
     image=image,
     secrets=[
         modal.Secret.from_name("mongodb-fsdl"),
     ],
-    mounts=[
-        # we make our local modules available to the container
-        modal.Mount.from_local_python_packages("docstore", "utils")
-    ],
 )
 
 
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(json_path="data/llm-papers.json", collection=None, db=None):
     """Calls the ETL pipeline using a JSON file with PDF metadata.
 
@@ -34,7 +30,7 @@ def main(json_path="data/llm-papers.json", collection=None, db=None):
 
     if not json_path.exists():
         print(f"{json_path} not found, writing to it from the database.")
-        paper_data = fetch_papers.call()
+        paper_data = fetch_papers.remote()
         paper_data_json = json.dumps(paper_data, indent=2)
         with open(json_path, "w") as f:
             f.write(paper_data_json)
@@ -46,23 +42,22 @@ def main(json_path="data/llm-papers.json", collection=None, db=None):
 
     documents = etl.shared.unchunk(extract_pdf.map(paper_data, return_exceptions=True))
 
-    with etl.shared.stub.run():
-        chunked_documents = etl.shared.chunk_into(documents, 10)
-        list(
-            etl.shared.add_to_document_db.map(
-                chunked_documents, kwargs={"db": db, "collection": collection}
-            )
+    chunked_documents = etl.shared.chunk_into(documents, 10)
+    list(
+        etl.shared.add_to_document_db.map(
+            chunked_documents, kwargs={"db": db, "collection": collection}
         )
+    )
 
 
-@stub.function(
+@app.function(
     image=image,
     # we can automatically retry execution of Modal functions on failure
     # -- this retry policy does exponential backoff
     retries=modal.Retries(backoff_coefficient=2.0, initial_delay=5.0, max_retries=3),
     # we can also limit the number of concurrent executions of a Modal function
     # -- here we limit to 50 so we don't hammer the arXiV API too hard
-    concurrency_limit=50,
+    max_containers=50,
 )
 def extract_pdf(paper_data):
     """Extracts the text from a PDF and adds metadata."""
@@ -129,7 +124,7 @@ def extract_pdf(paper_data):
     return documents
 
 
-@stub.function()
+@app.function()
 def fetch_papers(collection_name="all-content"):
     """Fetches papers from the LLM Lit Review, https://tfs.ai/llm-lit-review."""
     import docstore
@@ -168,7 +163,7 @@ def fetch_papers(collection_name="all-content"):
     return papers
 
 
-@stub.function()
+@app.function()
 def get_pdf_url(paper_data):
     """Attempts to extract a PDF URL from a paper's URL."""
     url = paper_data["url"]

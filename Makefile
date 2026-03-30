@@ -45,11 +45,11 @@ serve-backend: secrets ## run the Q&A backend as a hot-reloading "dev" server on
 
 cli-query: secrets ## run a query via a CLI interface
 	@tasks/pretty_log.sh "Assumes you've set up the vector index"
-	MODAL_ENVIRONMENT=$(ENV) modal run app.py::stub.cli --query "${QUERY}"
+	MODAL_ENVIRONMENT=$(ENV) modal run app.py::cli --query "${QUERY}"
 
 vector-index: secrets ## adds a FAISS vector index into the corpus to the application
 	@tasks/pretty_log.sh "Assumes you've set up the document storage, see document-store"
-	MODAL_ENVIRONMENT=$(ENV) modal run app.py::stub.create_vector_index --db $(MONGODB_DATABASE) --collection $(MONGODB_COLLECTION)
+	MODAL_ENVIRONMENT=$(ENV) modal run app.py::create_vector_index --db $(MONGODB_DATABASE) --collection $(MONGODB_COLLECTION)
 
 document-store: secrets ## creates a MongoDB collection that contains the document corpus
 	@tasks/pretty_log.sh "See docstore.py and the ETL notebook for details"

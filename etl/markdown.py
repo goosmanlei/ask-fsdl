@@ -7,23 +7,19 @@ image = etl.shared.image.pip_install(
     "mistune==2.0.5",
     "python-slugify==8.0.1",
     "smart-open==6.3.0",
-)
+).add_local_python_source("docstore", "utils")
 
-stub = modal.Stub(
+app = modal.App(
     name="etl-markdown",
     image=image,
     secrets=[
         modal.Secret.from_name("mongodb-fsdl"),
     ],
-    mounts=[
-        # we make our local modules available to the container
-        modal.Mount.from_local_python_packages("docstore", "utils")
-    ],
 )
 
 
 # run simple coordinating code locally, with dependency-inducing processing in the cloud
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(json_path="data/lectures-2022.json", collection=None, db=None):
     """Calls the ETL pipeline using a JSON file with markdown file metadata.
 
@@ -51,16 +47,15 @@ def main(json_path="data/lectures-2022.json", collection=None, db=None):
         )
     )
 
-    with etl.shared.stub.run():
-        chunked_documents = etl.shared.chunk_into(documents, 10)
-        list(
-            etl.shared.add_to_document_db.map(
-                chunked_documents, kwargs={"db": db, "collection": collection}
-            )
+    chunked_documents = etl.shared.chunk_into(documents, 10)
+    list(
+        etl.shared.add_to_document_db.map(
+            chunked_documents, kwargs={"db": db, "collection": collection}
         )
+    )
 
 
-@stub.function(image=image)
+@app.function(image=image)
 def to_documents(lecture, website_url, md_url):
     title, title_slug = lecture["title"], lecture["slug"]
     markdown_url = f"{md_url}/{title_slug}/index.md"
@@ -93,7 +88,7 @@ def to_documents(lecture, website_url, md_url):
     return documents
 
 
-@stub.function(image=image)
+@app.function(image=image)
 def get_text_from(url):
     from smart_open import open
 
@@ -103,7 +98,7 @@ def get_text_from(url):
     return contents
 
 
-@stub.function(image=image)
+@app.function(image=image)
 def get_target_headings_and_slugs(text):
     """Pull out headings from a markdown document and slugify them."""
     import mistune

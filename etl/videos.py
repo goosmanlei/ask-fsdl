@@ -3,22 +3,20 @@ import modal
 import etl.shared
 
 # extend the shared image with YouTube-handling dependencies
-image = etl.shared.image.pip_install("youtube-transcript-api==0.6.1", "srt==3.5.3")
+image = etl.shared.image.pip_install(
+    "youtube-transcript-api==0.6.1", "srt==3.5.3"
+).add_local_python_source("docstore", "utils")
 
-stub = modal.Stub(
+app = modal.App(
     name="etl-videos",
     image=image,
     secrets=[
         modal.Secret.from_name("mongodb-fsdl"),
     ],
-    mounts=[
-        # we make our local modules available to the container
-        modal.Mount.from_local_python_packages("docstore", "utils")
-    ],
 )
 
 
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(json_path="data/videos.json", collection=None, db=None):
     """Calls the ETL pipeline using a JSON file with YouTube video metadata.
 
@@ -35,16 +33,15 @@ def main(json_path="data/videos.json", collection=None, db=None):
         )
     )
 
-    with etl.shared.stub.run():
-        chunked_documents = etl.shared.chunk_into(documents, 10)
-        list(
-            etl.shared.add_to_document_db.map(
-                chunked_documents, kwargs={"db": db, "collection": collection}
-            )
+    chunked_documents = etl.shared.chunk_into(documents, 10)
+    list(
+        etl.shared.add_to_document_db.map(
+            chunked_documents, kwargs={"db": db, "collection": collection}
         )
+    )
 
 
-@stub.function(
+@app.function(
     retries=modal.Retries(max_retries=3, backoff_coefficient=2.0, initial_delay=5.0)
 )
 def extract_subtitles(video_info):

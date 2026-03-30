@@ -5,18 +5,20 @@ import os
 import aiohttp
 import json
 
-from modal import Image, Mount, Secret, Stub, asgi_app
+import modal
+from modal import Image, Secret, App, asgi_app
 
 from utils import pretty_log
 
-image = Image.debian_slim(python_version="3.10").pip_install("pynacl", "requests")
+image = Image.debian_slim(python_version="3.10").pip_install(
+    "pynacl", "requests"
+).add_local_python_source("utils")
 discord_secrets = [Secret.from_name("discord-secret-fsdl")]
 
-stub = Stub(
+app = App(
     "askfsdl-discord",
     image=image,
     secrets=discord_secrets,
-    mounts=[Mount.from_local_python_packages("utils")],
 )
 
 
@@ -34,13 +36,13 @@ class DiscordApplicationCommandOptionType(Enum):
     STRING = 3  # with language models, strings are all you need
 
 
-@stub.function(
+@app.function(
     # keep one instance warm to reduce latency, consuming ~0.2 GB while idle
     # this costs ~$3/month at current prices, so well within $10/month free tier credit
-    keep_warm=1,
+    min_containers=1,
 )
 @asgi_app(label="askfsdl-discord-bot")
-def app() -> FastAPI:
+def bot_app() -> FastAPI:
     app = FastAPI()
 
     app.add_middleware(
@@ -90,7 +92,7 @@ def app() -> FastAPI:
     return app
 
 
-@stub.function()
+@app.function()
 async def respond(
     question: str,
     application_id: str,
@@ -101,7 +103,7 @@ async def respond(
     import modal
 
     try:
-        raw_response = await modal.Function.lookup(
+        raw_response = await modal.Function.from_name(
             "askfsdl-backend", "qanda"
         ).remote.aio(question, request_id=interaction_token, with_logging=True)
         pretty_log(raw_response)
@@ -203,7 +205,7 @@ def construct_error_message(user_id: str) -> str:
     return error_message
 
 
-@stub.function()
+@app.function()
 def create_slash_command(force: bool = False):
     """Registers the slash command with Discord. Pass the force flag to re-register."""
     import os

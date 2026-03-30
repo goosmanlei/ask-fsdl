@@ -1,6 +1,7 @@
 documents.json
 
 .DS_Store
+*.sw[op]
 
 .env
 .env.dev

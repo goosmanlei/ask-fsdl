@@ -4,21 +4,17 @@ import modal
 # see app.py for more details
 image = modal.Image.debian_slim(python_version="3.10").pip_install(
     "langchain~=0.0.98", "pymongo[srv]==3.11"
-)
+).add_local_python_source("docstore", "utils")
 
-stub = modal.Stub(
+app = modal.App(
     name="etl-shared",
     secrets=[
         modal.Secret.from_name("mongodb-fsdl"),
     ],
-    mounts=[
-        # we make our local modules available to the container
-        modal.Mount.from_local_python_packages("docstore", "utils")
-    ],
 )
 
 
-@stub.function(image=image)
+@app.function(image=image)
 def add_to_document_db(documents_json, collection=None, db=None):
     """Adds a collection of json documents to a database."""
     from pymongo import InsertOne

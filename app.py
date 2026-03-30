@@ -28,11 +28,13 @@ image = modal.Image.debian_slim(  # we start from a lightweight linux distro
     # simple web UIs in Python, from 🤗
     "gantry==0.5.6",
     # 🏗️: monitoring, observability, and continual improvement for ML systems
+).add_local_python_source(  # we make our local modules available to the container
+    "vecstore", "docstore", "utils", "prompts"
 )
 
-# we define a Stub to hold all the pieces of our app
-# most of the rest of this file just adds features onto this Stub
-stub = modal.Stub(
+# we define an App to hold all the pieces of our app
+# most of the rest of this file just adds features onto this App
+app = modal.App(
     name="askfsdl-backend",
     image=image,
     secrets=[
@@ -41,25 +43,19 @@ stub = modal.Stub(
         modal.Secret.from_name("openai-api-key-fsdl"),
         modal.Secret.from_name("gantry-api-key-fsdl"),
     ],
-    mounts=[
-        # we make our local modules available to the container
-        modal.Mount.from_local_python_packages(
-            "vecstore", "docstore", "utils", "prompts"
-        )
-    ],
 )
 
 VECTOR_DIR = vecstore.VECTOR_DIR
-vector_storage = modal.NetworkFileSystem.persisted("vector-vol")
+vector_storage = modal.Volume.from_name("vector-vol", create_if_missing=True)
 
 
-@stub.function(
+@app.function(
     image=image,
-    network_file_systems={
+    volumes={
         str(VECTOR_DIR): vector_storage,
     },
 )
-@modal.web_endpoint(method="GET")
+@modal.fastapi_endpoint(method="GET")
 def web(query: str, request_id=None):
     """Exposes our Q&A chain for queries via a web endpoint."""
     import os
@@ -76,12 +72,12 @@ def web(query: str, request_id=None):
     return {"answer": answer}
 
 
-@stub.function(
+@app.function(
     image=image,
-    network_file_systems={
+    volumes={
         str(VECTOR_DIR): vector_storage,
     },
-    keep_warm=1,
+    min_containers=1,
 )
 def qanda(query: str, request_id=None, with_logging: bool = False) -> str:
     """Runs sourced Q&A for a query using LangChain.
@@ -138,9 +134,9 @@ def qanda(query: str, request_id=None, with_logging: bool = False) -> str:
     return answer
 
 
-@stub.function(
+@app.function(
     image=image,
-    network_file_systems={
+    volumes={
         str(VECTOR_DIR): vector_storage,
     },
     cpu=8.0,  # use more cpu for vector storage creation
@@ -169,7 +165,7 @@ def create_vector_index(collection: str = None, db: str = None):
     pretty_log(f"vector index {vecstore.INDEX_NAME} created")
 
 
-@stub.function(image=image)
+@app.function(image=image)
 def drop_docs(collection: str = None, db: str = None):
     """Drops a collection from the document storage."""
     import docstore
@@ -231,9 +227,9 @@ def prep_documents_for_vector_storage(documents):
     return ids, texts, metadatas
 
 
-@stub.function(
+@app.function(
     image=image,
-    network_file_systems={
+    volumes={
         str(VECTOR_DIR): vector_storage,
     },
 )
@@ -257,12 +253,12 @@ async def redirect_docs():
     return "/gradio/docs"
 
 
-@stub.function(
+@app.function(
     image=image,
-    network_file_systems={
+    volumes={
         str(VECTOR_DIR): vector_storage,
     },
-    keep_warm=1,
+    min_containers=1,
 )
 @modal.asgi_app(label="askfsdl-backend")
 def fastapi_app():
