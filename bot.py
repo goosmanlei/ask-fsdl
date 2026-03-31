@@ -11,7 +11,7 @@ from modal import Image, Secret, App, asgi_app
 from utils import pretty_log
 
 image = Image.debian_slim(python_version="3.10").pip_install(
-    "pynacl", "requests"
+    "pynacl", "requests", "fastapi", "aiohttp"
 ).add_local_python_source("utils")
 discord_secrets = [Secret.from_name("discord-secret-fsdl")]
 
@@ -75,7 +75,7 @@ def bot_app() -> FastAPI:
             pretty_log(question)
 
             # kick off our actual response in the background
-            respond.spawn(
+            await respond.spawn.aio(
                 question,
                 app_id,
                 interaction_token,

@@ -8,7 +8,7 @@ DISCORD_MAINTAINER_ID=${DISCORD_MAINTAINER_ID:-""}
 set --
 source tasks/pretty_log.sh
 
-modal secret create discord-secret-fsdl \
+modal secret create discord-secret-fsdl --force \
   DISCORD_AUTH="$DISCORD_AUTH" \
   DISCORD_PUBLIC_KEY="$DISCORD_PUBLIC_KEY" \
   DISCORD_CLIENT_ID="$DISCORD_CLIENT_ID" \

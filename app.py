@@ -30,6 +30,8 @@ image = modal.Image.debian_slim(  # we start from a lightweight linux distro
     # 锁定 fastapi，最后一个原生支持 pydantic v1 的版本
     "gradio~=3.34",
     # simple web UIs in Python, from 🤗
+    "pyarrow<14.0.0",
+    # 锁定 pyarrow，gantry 依赖的 datasets 在 pyarrow>=14 中移除了 PyExtensionType
     "gantry==0.5.6",
     # 🏗️: monitoring, observability, and continual improvement for ML systems
 ).add_local_python_source(  # we make our local modules available to the container
@@ -111,6 +113,10 @@ def qanda(query: str, request_id=None, with_logging: bool = False) -> str:
     sources_and_scores = vector_index.similarity_search_with_score(query, k=3)
 
     sources, scores = zip(*sources_and_scores)
+    for i, (src, score) in enumerate(zip(sources, scores), 1):
+        title = src.metadata.get("title", "unknown")
+        source_url = src.metadata.get("source", "")
+        pretty_log(f"  [{i}] score={score:.4f} | {title} | {source_url}")
 
     pretty_log("running query against Q&A chain")
 
@@ -124,7 +130,7 @@ def qanda(query: str, request_id=None, with_logging: bool = False) -> str:
     )
 
     result = chain(
-        {"input_documents": sources, "question": query}, return_only_outputs=True
+        {"input_documents": sources, "question": query + '（请翻译为中文回答）'}, return_only_outputs=True
     )
     answer = result["output_text"]
 
@@ -155,10 +161,12 @@ def create_vector_index(collection: str = None, db: str = None):
 
     collection = docstore.get_collection(collection, db)
     pretty_log(f"collecting documents from {collection.name}")
-    docs = docstore.get_documents(collection, db)
+    docs = list(docstore.get_documents(collection, db))
+    pretty_log(f"fetched {len(docs)} documents from collection")
 
     pretty_log("splitting into bite-size chunks")
     ids, texts, metadatas = prep_documents_for_vector_storage(docs)
+    pretty_log(f"split into {len(texts)} chunks for embedding")
 
     pretty_log(f"sending to vector index {vecstore.INDEX_NAME}")
     embedding_engine = vecstore.get_embedding_engine(disallowed_special=())
@@ -166,7 +174,8 @@ def create_vector_index(collection: str = None, db: str = None):
         vecstore.INDEX_NAME, embedding_engine, texts, metadatas
     )
     vector_index.save_local(folder_path=VECTOR_DIR, index_name=vecstore.INDEX_NAME)
-    pretty_log(f"vector index {vecstore.INDEX_NAME} created")
+    vector_storage.commit()  # 确保写入持久化到 Volume
+    pretty_log(f"vector index {vecstore.INDEX_NAME} saved to {VECTOR_DIR} with {len(texts)} vectors")
 
 
 @app.function(image=image)

@@ -32,7 +32,7 @@ serve-frontend: slash-command ## run the Discord bot as a hot-reloading "dev" se
 
 slash-command: frontend-secrets ## register the bot's slash command with Discord
 	@tasks/pretty_log.sh "Assumes you've set up your bot in Discord"
-	MODAL_ENVIRONMENT=$(ENV) modal run bot::create_slash_command
+	MODAL_ENVIRONMENT=$(ENV) modal run -m bot::create_slash_command
 	@tasks/pretty_log.sh "Slash command registered."
 
 backend: secrets ## deploy the Q&A backend on Modal
