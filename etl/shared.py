@@ -2,9 +2,11 @@ import modal
 
 # definition of our container image and app for deployment on Modal
 # see app.py for more details
-image = modal.Image.debian_slim(python_version="3.10").pip_install(
-    "langchain~=0.0.98", "pymongo[srv]==3.11"
-).add_local_python_source("docstore", "utils")
+image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .pip_install("langchain~=0.0.98", "pymongo[srv]==3.11")
+    .add_local_python_source("docstore", "utils")
+)
 
 app = modal.App(
     name="etl-shared",

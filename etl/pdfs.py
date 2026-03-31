@@ -2,11 +2,11 @@ import modal
 
 import etl.shared
 
-# extend the shared image with PDF-handling dependencies
-image = etl.shared.image.pip_install(
-    "arxiv==1.4.7",
-    "pypdf==3.8.1",
-).add_local_python_source("docstore", "utils")
+image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .pip_install("langchain~=0.0.98", "pymongo[srv]==3.11", "arxiv~=2.1", "pypdf==3.8.1")
+    .add_local_python_source("etl", "docstore", "utils")
+)
 
 app = modal.App(
     name="etl-pdfs",
@@ -55,9 +55,8 @@ def main(json_path="data/llm-papers.json", collection=None, db=None):
     # we can automatically retry execution of Modal functions on failure
     # -- this retry policy does exponential backoff
     retries=modal.Retries(backoff_coefficient=2.0, initial_delay=5.0, max_retries=3),
-    # we can also limit the number of concurrent executions of a Modal function
-    # -- here we limit to 50 so we don't hammer the arXiV API too hard
-    max_containers=50,
+    # 限制并发容器数，避免触发 arxiv 的限速
+    max_containers=20,
 )
 def extract_pdf(paper_data):
     """Extracts the text from a PDF and adds metadata."""
@@ -67,10 +66,16 @@ def extract_pdf(paper_data):
 
     from langchain.document_loaders import PyPDFLoader
 
+    import random
+    import time
+
     pdf_url = paper_data.get("pdf_url")
+    title = paper_data.get("title", pdf_url)
     if pdf_url is None:
+        print(f"[extract_pdf] 跳过（无 PDF URL）: {paper_data.get('title', paper_data.get('url', '未知'))}")
         return []
 
+    print(f"[extract_pdf] 开始下载: {title[:60]} <- {pdf_url}")
     logger = logging.getLogger("pypdf")
     logger.setLevel(logging.ERROR)
 
@@ -78,8 +83,14 @@ def extract_pdf(paper_data):
 
     try:
         documents = loader.load_and_split()
-    except Exception:
-        return []
+    except Exception as e:
+        err_str = str(e)
+        # 404/403 是永久性错误，直接跳过不重试
+        if "404" in err_str or "403" in err_str:
+            print(f"[extract_pdf] ✗ 跳过（{err_str[:40]}）: {title[:60]}")
+            return []
+        print(f"[extract_pdf] ✗ 下载失败: {title[:60]} ({e})")
+        raise  # 其他错误抛出，触发 Modal 重试
 
     documents = [document.dict() for document in documents]
     for document in documents:  # rename page_content to text, handle non-unicode data
@@ -97,13 +108,25 @@ def extract_pdf(paper_data):
         try:
             # execute the search with the client and get the first result
             result = next(client.results(search_query))
+            metadata = {
+                "arxiv_id": arxiv_id,
+                "title": result.title,
+                "date": result.updated,
+            }
         except ConnectionResetError as e:
             raise Exception("Triggered request limit on arxiv.org, retrying") from e
-        metadata = {
-            "arxiv_id": arxiv_id,
-            "title": result.title,
-            "date": result.updated,
-        }
+        except arxiv.HTTPError as e:
+            if e.status in (403, 404):
+                # 永久性错误，降级不重试
+                print(f"[extract_pdf] arxiv API HTTP {e.status}，降级使用原始标题: {title[:60]}")
+                metadata = {"arxiv_id": arxiv_id, "title": paper_data.get("title", arxiv_id)}
+            else:
+                # 其他 HTTP 错误（如 301）也降级
+                print(f"[extract_pdf] arxiv API 元数据获取失败（{e}），降级使用原始标题")
+                metadata = {"arxiv_id": arxiv_id, "title": paper_data.get("title", arxiv_id)}
+        except StopIteration:
+            print(f"[extract_pdf] arxiv API 返回空结果，降级使用原始标题: {title[:60]}")
+            metadata = {"arxiv_id": arxiv_id, "title": paper_data.get("title", arxiv_id)}
     else:
         metadata = {"title": paper_data.get("title")}
 
@@ -121,6 +144,7 @@ def extract_pdf(paper_data):
 
     documents = etl.shared.enrich_metadata(documents)
 
+    print(f"[extract_pdf] ✓ 完成: {title[:60]}，共 {len(documents)} 页")
     return documents
 
 
@@ -167,6 +191,7 @@ def fetch_papers(collection_name="all-content"):
 def get_pdf_url(paper_data):
     """Attempts to extract a PDF URL from a paper's URL."""
     url = paper_data["url"]
+    title = paper_data.get("title", url)
     if url.strip("#/").endswith(".pdf"):
         pdf_url = url
     elif "arxiv.org" in url:
@@ -178,6 +203,7 @@ def get_pdf_url(paper_data):
     else:
         pdf_url = None
     paper_data["pdf_url"] = pdf_url
+    print(f"[get_pdf_url] {'✓' if pdf_url else '✗'} {title[:60]} -> {pdf_url or '无法获取 PDF URL'}")
 
     return paper_data
 

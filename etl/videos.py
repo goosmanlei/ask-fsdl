@@ -2,10 +2,11 @@ import modal
 
 import etl.shared
 
-# extend the shared image with YouTube-handling dependencies
-image = etl.shared.image.pip_install(
-    "youtube-transcript-api==0.6.1", "srt==3.5.3"
-).add_local_python_source("docstore", "utils")
+image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .pip_install("langchain~=0.0.98", "pymongo[srv]==3.11", "youtube-transcript-api>=0.6.3", "srt==3.5.3")
+    .add_local_python_source("etl", "docstore", "utils")
+)
 
 app = modal.App(
     name="etl-videos",
@@ -45,8 +46,14 @@ def main(json_path="data/videos.json", collection=None, db=None):
     retries=modal.Retries(max_retries=3, backoff_coefficient=2.0, initial_delay=5.0)
 )
 def extract_subtitles(video_info):
+    from youtube_transcript_api import TranscriptsDisabled, NoTranscriptFound
+
     video_id, video_title = video_info["id"], video_info["title"]
-    subtitles = get_transcript(video_id)
+    try:
+        subtitles = get_transcript(video_id)
+    except (TranscriptsDisabled, NoTranscriptFound):
+        print(f"[extract_subtitles] 跳过（无字幕）: {video_title}")
+        return []
     chapters = get_chapters(video_id)
     chapters = add_transcript(chapters, subtitles)
 

@@ -2,12 +2,11 @@ import modal
 
 import etl.shared
 
-# extend the shared image with markdown-handling dependencies
-image = etl.shared.image.pip_install(
-    "mistune==2.0.5",
-    "python-slugify==8.0.1",
-    "smart-open==6.3.0",
-).add_local_python_source("docstore", "utils")
+image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .pip_install("langchain~=0.0.98", "pymongo[srv]==3.11", "mistune==2.0.5", "python-slugify==8.0.1", "smart-open==6.3.0")
+    .add_local_python_source("etl", "docstore", "utils")
+)
 
 app = modal.App(
     name="etl-markdown",
@@ -61,8 +60,8 @@ def to_documents(lecture, website_url, md_url):
     markdown_url = f"{md_url}/{title_slug}/index.md"
     website_url = f"{website_url}/{title_slug}"
 
-    text = get_text_from(markdown_url)
-    headings, heading_slugs = get_target_headings_and_slugs(text)
+    text = get_text_from.local(markdown_url)
+    headings, heading_slugs = get_target_headings_and_slugs.local(text)
 
     subtexts = split_by_headings(text, headings)
     headings, heading_slugs = [""] + headings, [""] + heading_slugs

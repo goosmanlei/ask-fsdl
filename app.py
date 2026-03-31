@@ -24,6 +24,10 @@ image = modal.Image.debian_slim(  # we start from a lightweight linux distro
     # vector storage and similarity search
     "pymongo[srv]==3.11",
     # python client for MongoDB, our data persistence solution
+    "pydantic==1.9.0",
+    # 锁定 pydantic v1，同时满足 gantry==0.5.6（精确要求1.9.0）和 fastapi==0.99.1
+    "fastapi==0.99.1",
+    # 锁定 fastapi，最后一个原生支持 pydantic v1 的版本
     "gradio~=3.34",
     # simple web UIs in Python, from 🤗
     "gantry==0.5.6",
